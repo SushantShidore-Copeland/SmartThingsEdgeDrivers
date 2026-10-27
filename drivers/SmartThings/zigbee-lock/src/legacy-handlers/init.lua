@@ -381,6 +381,7 @@ end
 
 local migrate = function(driver, device, command)
   local post_migration_consts = require "lock_utils.constants"
+  local table_utils = require "lock_utils.tables"
   local LockUsers = capabilities.lockUsers
   local LockCredentials = capabilities.lockCredentials
 
@@ -409,16 +410,19 @@ local migrate = function(driver, device, command)
   local cached_lock_codes = lock_utils.get_lock_codes(device)
   local ordered_code_slots = {}
   for code_slot_str, _ in pairs(cached_lock_codes) do
-    table.insert(ordered_code_slots, tonumber(code_slot_str))
+    local code_slot = tonumber(code_slot_str)
+    if code_slot then table.insert(ordered_code_slots, code_slot) end
   end
   table.sort(ordered_code_slots)
-  for _, code_slot in ipairs(ordered_code_slots) do
+  -- Slots that are not valid indices (e.g. slot 0 as a userIndex) are replaced with a valid, unused one,
+  -- without displacing any slot that is already valid.
+  local user_indices = table_utils.resolve_indices("users", ordered_code_slots)
+  local credential_indices = table_utils.resolve_indices("credentials", ordered_code_slots)
+  for i, code_slot in ipairs(ordered_code_slots) do
     local code_name = cached_lock_codes[tostring(code_slot)]
     -- cached_lock_codes is formatted as { ["1"] = "Guest 1", ["2"] = "Guest 2" }, etc
-    if code_slot then
-      table.insert(users, { userIndex = code_slot, userType = "guest", userName = code_name })
-      table.insert(credentials, { userIndex = code_slot, credentialIndex = code_slot, credentialType = post_migration_consts.CRED_TYPE_PIN, credentialName = code_name })
-    end
+    table.insert(users, { userIndex = user_indices[i], userType = "guest", userName = code_name })
+    table.insert(credentials, { userIndex = user_indices[i], credentialIndex = credential_indices[i], credentialType = post_migration_consts.CRED_TYPE_PIN, credentialName = code_name })
   end
   -- manually ensure user/cred state is persisted, then emit events to populate the new capabilities with the migrated data.
   device:set_field("persistedUsers", users, { persist = true })

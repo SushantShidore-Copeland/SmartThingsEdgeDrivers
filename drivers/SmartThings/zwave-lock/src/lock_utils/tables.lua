@@ -146,6 +146,34 @@ function table_utils.next_index(device, table_name)
   return idx
 end
 
+-- Resolve a list of candidate match_key values for the named table into valid, unique ones.
+-- A candidate is valid if it is an integer at or above the table's minimum and not already
+-- claimed by an earlier candidate. Valid candidates always keep their value, regardless of the
+-- order they appear in; invalid or duplicate candidates are then assigned the lowest unused
+-- values, starting at the minimum. Returns a list parallel to `candidates`. Used to sanitize
+-- indices when migrating legacy lockCodes data to lockUsers/lockCredentials.
+function table_utils.resolve_indices(table_name, candidates)
+  local def = DEFS[table_name]
+  local count = candidates.n or #candidates
+  local occupied, resolved, needs_replacement = {}, {}, {}
+  for i = 1, count do
+    local idx = candidates[i]
+    if math.type(idx) == "integer" and idx >= def.minimum and not occupied[idx] then
+      occupied[idx] = true
+      resolved[i] = idx
+    else
+      table.insert(needs_replacement, i)
+    end
+  end
+  local next_free = def.minimum
+  for _, i in ipairs(needs_replacement) do
+    while occupied[next_free] do next_free = next_free + 1 end
+    occupied[next_free] = true
+    resolved[i] = next_free
+  end
+  return resolved
+end
+
 function table_utils.get_max_entries(device, table_name)
   local def = resolve_table_def(device, table_name)
   if not def then return end
